@@ -1,7 +1,7 @@
 <template>
   <div class="page fade-in">
     <PageHeader
-      numeral="III"
+      numeral="IV"
       eyebrow="gap registry · 缺口登记"
       title="缺口事件"
       subtitle="对齐后连续空桶（长度 ≥ 2 桶）登记为缺口事件；置信度与严重度由 Python 缺口引擎计算，可在此标注处置结论。"

@@ -50,3 +50,4 @@ class EstimateResponse(BaseModel):
     signal_count: int
     span_seconds: int
     grid_s: int
+    gate: dict | None = None

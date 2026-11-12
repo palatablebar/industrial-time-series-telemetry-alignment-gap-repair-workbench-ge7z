@@ -14,7 +14,7 @@ from src.middlewares.audit_logger import AuditMiddleware
 from src.middlewares.auth import AuthMiddleware
 from src.middlewares.error_handler import RequestIdMiddleware, install_error_handlers
 from src.middlewares.quota import RateLimitMiddleware
-from src.routes import auth, gap, health, job, report, run, signal, source
+from src.routes import auth, gap, health, ingest, job, report, run, signal, source
 from src.utils.logger import log_event
 
 
@@ -59,6 +59,7 @@ app.include_router(health.router)
 app.include_router(auth.router)
 app.include_router(source.router)
 app.include_router(signal.router)
+app.include_router(ingest.router)
 app.include_router(job.router)
 app.include_router(run.router)
 app.include_router(gap.router)
@@ -76,6 +77,7 @@ def index() -> dict:
             "/auth/login",
             "/data-sources",
             "/signals",
+            "/ingest-batches",
             "/alignment-jobs",
             "/alignment-runs/{id}",
             "/alignment-runs/{id}/export.csv",

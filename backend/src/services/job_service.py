@@ -10,7 +10,7 @@ from src.config.celery_app import celery_app
 from src.constants.enums import AggStrategy, FillStrategy, GridSize, JobStatus
 from src.constants.error_codes import AppError, ErrorCode
 from src.models import AlignmentJob, AlignmentRun, User
-from src.services import signal_service
+from src.services import ingest_service, signal_service
 from src.utils.logger import log_event
 from src.utils.timeutil import iso, parse_iso
 
@@ -32,6 +32,16 @@ def _default_name(device_codes: list[str], window_start: datetime) -> str:
     return f"{devices}-对齐-{stamp}"
 
 
+def _source_ids_of(signals) -> list[int]:
+    return sorted({int(signal.source_id) for signal in signals if signal.source_id is not None})
+
+
+def gate_for_device_codes(db: Session, device_codes: list[str], window_start, window_end) -> dict:
+    """Gate preview for a not-yet-created job (used by the config screen)."""
+    signals = signal_service.signals_for_devices(db, device_codes)
+    return ingest_service.evaluate_gate(db, _source_ids_of(signals), window_start, window_end)
+
+
 def create_job(db: Session, payload, user: User) -> AlignmentJob:
     _validate(payload)
     try:
@@ -42,6 +52,7 @@ def create_job(db: Session, payload, user: User) -> AlignmentJob:
     if window_end <= window_start:
         raise AppError(ErrorCode.VALIDATION_FAILED, "结束时间必须晚于开始时间", status_code=422)
     signals = signal_service.signals_for_devices(db, payload.device_codes)
+    ingest_service.ensure_gate_open(db, _source_ids_of(signals), window_start, window_end)
     name = (payload.name or "").strip() or _default_name(payload.device_codes, window_start)
     existing = db.scalar(select(AlignmentJob).where(AlignmentJob.name == name))
     if existing is not None:
@@ -102,6 +113,8 @@ def rerun(db: Session, job_id: int) -> AlignmentJob:
     job = get_job(db, job_id)
     if job.status == JobStatus.RUNNING.value:
         raise AppError(ErrorCode.JOB_NOT_RUNNABLE, "任务正在运行中", status_code=409)
+    signals = signal_service.signals_for_devices(db, job.device_codes or [])
+    ingest_service.ensure_gate_open(db, _source_ids_of(signals), job.window_start, job.window_end)
     dispatch(db, job)
     return job
 

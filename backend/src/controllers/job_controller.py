@@ -2,8 +2,9 @@
 from sqlalchemy.orm import Session
 
 from src.config.settings import settings
+from src.constants.error_codes import AppError
 from src.middlewares.audit_logger import record
-from src.middlewares.quota import consume_job_quota
+from src.middlewares.quota import consume_job_quota, refund_job_quota
 from src.models import User
 from src.services import job_service, signal_service
 from src.utils.timeutil import parse_iso, to_epoch
@@ -11,7 +12,11 @@ from src.utils.timeutil import parse_iso, to_epoch
 
 def create_job(request, db: Session, payload, user: User) -> dict:
     quota = consume_job_quota(db, user)
-    job = job_service.create_job(db, payload, user)
+    try:
+        job = job_service.create_job(db, payload, user)
+    except AppError as exc:
+        refund_job_quota(db, user, quota)
+        raise exc
     record(
         request,
         "alignment_job.create",
@@ -29,7 +34,10 @@ def list_jobs(db: Session) -> dict:
 def job_detail(db: Session, job_id: int) -> dict:
     job = job_service.get_job(db, job_id)
     run = job_service.run_of(db, job_id)
-    return {"job": job_service.to_dict(db, job), "run_id": run.id if run else None}
+    gate = job_service.gate_for_device_codes(
+        db, job.device_codes or [], job.window_start, job.window_end
+    )
+    return {"job": job_service.to_dict(db, job), "run_id": run.id if run else None, "gate": gate}
 
 
 def run_job(request, db: Session, job_id: int, user: User) -> dict:
@@ -45,12 +53,16 @@ def estimate(db: Session, payload) -> dict:
     grid_s = int(payload.grid_s)
     span = max(1, int(round(window_end - window_start)))
     points = signal_service.point_count(db, [signal.id for signal in signals], window_start, window_end)
+    gate = job_service.gate_for_device_codes(
+        db, payload.device_codes, parse_iso(payload.window_start), parse_iso(payload.window_end)
+    )
     return {
         "bucket_count": span // grid_s,
         "point_count": points,
         "signal_count": len(signals),
         "span_seconds": span,
         "grid_s": grid_s,
+        "gate": gate,
     }
 
 

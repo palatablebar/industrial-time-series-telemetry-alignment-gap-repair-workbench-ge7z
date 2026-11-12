@@ -6,10 +6,11 @@ export interface NavItem {
 }
 
 export const NAV_ITEMS: NavItem[] = [
-  { path: '/sources', label: '数据源与测点', numeral: 'I', hint: 'gateway ledger' },
-  { path: '/jobs/new', label: '对齐任务配置', numeral: 'II', hint: 'grid alignment' },
-  { path: '/gaps', label: '缺口事件', numeral: 'III', hint: 'gap registry' },
-  { path: '/reports', label: '质量报告', numeral: 'IV', hint: 'quality ephemeris' },
+  { path: '/ingest', label: '回传批次', numeral: 'I', hint: 'nightly hand-over' },
+  { path: '/sources', label: '数据源与测点', numeral: 'II', hint: 'gateway ledger' },
+  { path: '/jobs/new', label: '对齐任务配置', numeral: 'III', hint: 'grid alignment' },
+  { path: '/gaps', label: '缺口事件', numeral: 'IV', hint: 'gap registry' },
+  { path: '/reports', label: '质量报告', numeral: 'V', hint: 'quality ephemeris' },
 ]
 
 export const FORMULA_TEXT =

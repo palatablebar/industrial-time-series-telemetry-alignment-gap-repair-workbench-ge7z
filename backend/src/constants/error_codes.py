@@ -13,6 +13,8 @@ class ErrorCode:
     JOB_NOT_RUNNABLE = "TSA-3001"
     JOB_FAILED = "TSA-3002"
     EXPORT_FORBIDDEN = "TSA-3003"
+    BATCH_INCOMPLETE = "TSA-3004"
+    SEGMENT_UNKNOWN = "TSA-3005"
     INTERNAL = "TSA-5000"
 
 
@@ -40,5 +42,7 @@ DEFAULT_MESSAGES = {
     ErrorCode.JOB_NOT_RUNNABLE: "任务当前状态不可执行",
     ErrorCode.JOB_FAILED: "对齐任务执行失败",
     ErrorCode.EXPORT_FORBIDDEN: "当前角色无导出权限",
+    ErrorCode.BATCH_INCOMPLETE: "回传批次段未到齐，不能启动对齐",
+    ErrorCode.SEGMENT_UNKNOWN: "投递段不在该批次的段清单内",
     ErrorCode.INTERNAL: "服务内部错误",
 }

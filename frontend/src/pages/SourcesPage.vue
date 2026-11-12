@@ -1,7 +1,7 @@
 <template>
   <div class="page fade-in">
     <PageHeader
-      numeral="I"
+      numeral="II"
       eyebrow="gateway ledger · 采集档案"
       title="数据源与测点"
       subtitle="3 套采集网关、6 台注塑机、12 个测点。左侧为网关索引，右侧为测点档案与时钟漂移提示。"

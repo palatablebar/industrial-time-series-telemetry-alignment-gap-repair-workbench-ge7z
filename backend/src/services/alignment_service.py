@@ -7,9 +7,9 @@ from datetime import datetime
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from src.constants.enums import FailureReason, JobStatus, RunStatus
+from src.constants.enums import JobStatus, RunStatus
 from src.models import AlignmentJob, AlignmentRun, GapEvent, RawTelemetry, Signal
-from src.services import gap_engine
+from src.services import gap_engine, ingest_service
 from src.services.align_engine import SignalInput, align_job
 from src.utils.logger import log_event
 from src.utils.timeutil import from_epoch, iso, to_epoch
@@ -61,6 +61,38 @@ def execute_job(db: Session, job: AlignmentJob) -> AlignmentRun:
     job.error_reason = ""
     db.commit()
     db.refresh(run)
+
+    # Re-check the intake gate inside the worker: a job can sit in the queue while
+    # its batch is still missing segments, so dispatch-time approval is not enough.
+    source_ids = sorted({int(signal.source_id) for signal in signals if signal.source_id is not None})
+    gate = ingest_service.evaluate_gate(db, source_ids, job.window_start, job.window_end)
+    if not gate["can_start"]:
+        log_event(
+            "ALIGNMENT_GATE_CLOSED",
+            job_id=job.id,
+            reason=gate["reason"],
+            batches=[item["batch_key"] for item in gate["blocking_batches"]],
+        )
+        return _finalize_failure(
+            db,
+            job,
+            run,
+            gate["reason"],
+            {
+                "reason": gate["summary"],
+                "blocking_batches": [
+                    {
+                        "batch_key": item["batch_key"],
+                        "received_segments": item["received_segments"],
+                        "expected_segments": item["expected_segments"],
+                        "missing_segments": [seg["key"] for seg in item["missing_segments"]],
+                    }
+                    for item in gate["blocking_batches"]
+                ],
+            },
+            {"gate": gate},
+            started,
+        )
 
     inputs = _load(signals, db, window_start, window_end)
     aligned = align_job(

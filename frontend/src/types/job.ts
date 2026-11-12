@@ -1,3 +1,5 @@
+import type { IngestGate } from './ingest'
+
 export type JobStatus = 'pending' | 'running' | 'completed' | 'failed'
 export type AggStrategy = 'mean' | 'last' | 'linear'
 export type FillStrategy = 'locf' | 'linear' | 'seasonal_naive'
@@ -27,4 +29,5 @@ export interface JobEstimate {
   signal_count: number
   span_seconds: number
   grid_s: number
+  gate?: IngestGate | null
 }

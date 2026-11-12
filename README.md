@@ -18,15 +18,38 @@
 - **一天的工作剧本**（与 seed 数据一致）：
   1. 08:00 三套网关开始夜间批次回传：`GW-CHZ-01`（1s，OPC-UA）、`GW-CHZ-02`（5s，DCS 历史站）、
      `GW-CHZ-03`（10s，OPC-UA 批量上报）；
-  2. 工程师 `engineer@tsalign.demo` 在「数据源与测点」页看到 `GW-CHZ-02` 的 `+312ms` 漂移告警；
-  3. 在「对齐任务配置」选 `M-07` 三测点（振动 X 由 1#/2# 网关冗余采集 + 主轴电流），
+  2. 09:00 `GW-CHZ-02` 的夜间第二批回传包只到了 `N1`/`N2` 两个分段，`N3`/`N4` 未到；
+     工程师在「回传批次」页看到 **收到 2/4 段、1200 行有效样本、5 行坏行隔离**，
+     对齐闸门显示 CLOSED——已收样本只计入进度，不进入对齐输入；
+  3. 工程师 `engineer@tsalign.demo` 在「数据源与测点」页看到 `GW-CHZ-02` 的 `+312ms` 漂移告警；
+  4. 在「对齐任务配置」选 `M-07` 三测点（振动 X 由 1#/2# 网关冗余采集 + 主轴电流），
      目标网格 5s、线性聚合、线性填补、近 24h 窗口，预估约 1440 桶；
-  4. 提交后 Celery worker 拉取 5,760 行原始点，运行 `align_engine`（分箱 + 互相关漂移）与
+     页面显示闸门 CLOSED 并列出缺段 `N3`、`N4`，禁止发起；
+  5. 回到「回传批次」页补投 `N3`/`N4`（演示环境用「补投该段」模拟网关）。
+     补齐时只接收缺段，已投递的 `N1`/`N2` 重复投递不会新增样本；
+     坏行逐行隔离并保留原因（时间戳不可解析 / 数值不可解析 / 测点不在网关 / 缺字段 / 非 JSON 行，
+     以及跨段同测点同时间戳重复）；
+  6. 批次转为 `complete` 后，暂存样本一次性转正到 `raw_telemetry`，闸门 OPEN；
+  7. 重新发起对齐：Celery worker 拉取 5,760 行原始点，运行 `align_engine`（分箱 + 互相关漂移）与
      `gap_engine`（缺口识别 + 填补 + 稳健 z 异常率 + 质量分），结果落 `alignment_run` / `gap_event`；
-  5. 结果页显示覆盖率 98.194%、漂移 +310ms、4 起缺口共 85s、质量分 86.58；
-  6. 导出 CSV（1,440 数据行）交给可靠性分析；分析师 `analyst@tsalign.demo` 只能查看/导出/标注，
+  8. 结果页显示覆盖率 98.194%、漂移 +310ms、4 起缺口共 85s、质量分 86.58；
+  9. 导出 CSV（1,440 数据行）交给可靠性分析；分析师 `analyst@tsalign.demo` 只能查看/导出/标注，
      点「发起对齐」得到 403；车间主管 `viewer@tsalign.demo` 能看到质量分与缺口，但导出按钮禁用、接口 403；
-  7. 追溯：`audit_log` 记录任务创建 / 运行 / 导出 / 标注，质量报告页可回看漂移台账。
+  10. 追溯：`audit_log` 记录任务创建 / 运行 / 导出 / 标注 / 分段投递，质量报告页可回看漂移台账。
+
+### 夜间回传的分批续传（`backend/src/services/ingest_service.py`）
+
+- **批次 → 段 → 暂存样本**：`ingest_batch` 保存段清单与计数，`ingest_segment` 记录每段是否到达，
+  通过校验的行先落 `ingest_sample`（暂存区），**段未到齐不进 `raw_telemetry`**；
+- **续传**：缺段可单独投递；已到段的重复投递是幂等空操作，不新增样本（无论批次是否已补齐）；
+- **转正**：最后一段到达后，暂存样本按时间顺序写入 `raw_telemetry`（与既有原始点去重），
+  批次标记 `promoted_at`，此后对齐引擎才可能读到这些行；
+- **坏行隔离**：逐行校验，失败行进 `ingest_quarantine` 并带 `reason` / 行号 / 原行 JSON，
+  单行坏不拖垮整批；已收行照常计入进度；
+- **对齐闸门**：`evaluate_gate` 检查与任务窗口重叠、且仍为 `receiving` 的批次；
+  任务创建、重跑、Celery 执行三处都会复核。未通过返回 `TSA-3004`（409），
+  worker 侧则把 run 记为 `failed / batch_incomplete` 并保留缺段清单。
+
 
 ## 角色权限
 
@@ -76,6 +99,15 @@ docker compose exec -T backend python -m scripts.seed_demo   # 幂等 seed（也
 open http://localhost:18225
 ```
 
+seed 除 5,760 行基础遥测外，还会生成一个**故意未完批**的夜间批次
+`GW-CHZ-02-NIGHT-20261110B`（N1/N2 已到、N3/N4 缺），对应任务
+`M-07 夜间回传补数对齐 20261110B`，可直接在页面上演示「分批续传 + 闸门」。
+
+```bash
+# 后端测试（SQLite 内存库，无需 Postgres / Redis）
+docker compose exec -T backend python -m unittest discover -s tests -t . -v
+```
+
 `docker compose ps` 应看到 5/5 healthy；`docker compose down -v --remove-orphans` 清理。
 
 ## 页面
@@ -83,8 +115,9 @@ open http://localhost:18225
 | 路由 | 页面 | 说明 |
 |---|---|---|
 | `/login` | 登录 | 手输三账号之一；无快捷切换 |
+| `/ingest` | 夜间回传批次 | 批次索引 + 段进度 + 缺段补投 + 坏行隔离原因 + 对齐闸门 |
 | `/sources` | 数据源与测点 | 左网关索引 + 右测点档案（共用 `SignalCard`） |
-| `/jobs/new` | 对齐任务配置 | 时间窗 / 网格 / 策略 / 实时预估点数 |
+| `/jobs/new` | 对齐任务配置 | 时间窗 / 网格 / 策略 / 实时预估点数 / 回传闸门 |
 | `/runs/:id` | 运行结果详情 | Canvas2D 波形 + 缺口标记 + 质量分（共用 `WaveformChart`） |
 | `/gaps` | 缺口事件 | 最近运行缺口时间轴 + 登记簿 + 标注（共用 `WaveformChart` timeline 模式） |
 | `/reports` | 质量报告与导出 | 质量趋势 / 漂移台账 / 严重度分布 / CSV 导出 / 公式卡 |
@@ -103,6 +136,9 @@ open http://localhost:18225
 | `FillStrategy` / 填补 | 同上，`gap_engine.py` | 同上（`FILL_STRATEGIES`） |
 | `GapSeverity` / 严重度 | 同上，`gap_engine.py` | 同上（`GAP_SEVERITIES`） |
 | `SourceProtocol` / 协议 | 同上 | 同上（`SOURCE_PROTOCOLS`） |
+| `IngestBatchStatus` / 批次状态 | 同上 | 页面内联（`receiving` / `complete`） |
+| `IngestSegmentStatus` / 段状态 | 同上 | 页面内联（`missing` / `received`） |
+| `QuarantineReason` / 隔离原因 | 同上（含中文 `QUARANTINE_LABELS`） | 详情接口直接下发 `reason_label` |
 
 ## 技术栈
 

@@ -16,7 +16,16 @@ import numpy as np
 from src.config.database import SessionLocal, init_db
 from src.constants.enums import JobStatus, RunStatus
 from src.constants.messages import DEMO_PASSWORD
-from src.models import AlignmentJob, AlignmentRun, DataSource, GapEvent, RawTelemetry, Signal, User
+from src.models import (
+    AlignmentJob,
+    AlignmentRun,
+    DataSource,
+    GapEvent,
+    IngestBatch,
+    RawTelemetry,
+    Signal,
+    User,
+)
 from src.services.demo_data import (
     BASE_DATETIME,
     BASE_EPOCH,
@@ -138,6 +147,14 @@ def _persist_raw(db, signals: list[Signal], series: dict[str, list[tuple[float, 
     existing = db.query(RawTelemetry).filter(RawTelemetry.signal_id.in_(ids)).count()
     expected = sum(len(rows) for rows in series.values())
     if existing != expected:
+        # rows promoted by a completed gateway batch are part of the canonical
+        # dataset too, so the reseed window must include them
+        from src.models import IngestQuarantine, IngestSample, IngestSegment
+
+        db.query(IngestQuarantine).delete(synchronize_session=False)
+        db.query(IngestSample).delete(synchronize_session=False)
+        db.query(IngestSegment).delete(synchronize_session=False)
+        db.query(IngestBatch).delete(synchronize_session=False)
         db.query(RawTelemetry).filter(RawTelemetry.signal_id.in_(ids)).delete(synchronize_session=False)
         db.commit()
         batch: list[RawTelemetry] = []
@@ -296,6 +313,14 @@ def _upsert_gaps(db, run: AlignmentRun, gaps: list[dict], signal_by_code: dict[s
     db.commit()
 
 
+def _persist_ingest_demo_batch(db, users: list[User]) -> dict:
+    """Seed one deliberately incomplete gateway batch for the resume screen."""
+    from src.services.ingest_demo import seed_demo_batch
+
+    engineer = next(user for user in users if user.email == "engineer@tsalign.demo")
+    return seed_demo_batch(db, engineer)
+
+
 def run_seed() -> dict:
     init_db()
     db = SessionLocal()
@@ -307,6 +332,11 @@ def run_seed() -> dict:
         raw_points = _persist_raw(db, signals, series)
         computed = compute_seed_results(series)
         jobs, runs = _persist_jobs_and_runs(db, signals, computed)
+        ingest_demo = _persist_ingest_demo_batch(db, users)
+        log_event("INGEST_DEMO_SEEDED", **ingest_demo)
+        incomplete_batches = (
+            db.query(IngestBatch).filter(IngestBatch.status == "receiving").count()
+        )
         seeded_run_ids = [run.id for run in runs]
         gap_count = (
             db.query(GapEvent).filter(GapEvent.run_id.in_(seeded_run_ids)).count() if seeded_run_ids else 0
@@ -320,12 +350,15 @@ def run_seed() -> dict:
             .count(),
             "gaps": gap_count,
             "users": db.query(User).filter(User.email.in_(SEED_EMAILS)).count(),
+            "ingest_batches": db.query(IngestBatch).count(),
+            "incomplete_batches": incomplete_batches,
         }
         log_event("SEED_FINISHED", **summary)
         line = (
             f"SEED_SUMMARY sources={summary['sources']} signals={summary['signals']} "
             f"raw_points={summary['raw_points']} jobs={summary['jobs']} gaps={summary['gaps']} "
-            f"users={summary['users']}"
+            f"users={summary['users']} ingest_batches={summary['ingest_batches']} "
+            f"incomplete_batches={summary['incomplete_batches']}"
         )
         print(line, flush=True)
         return summary

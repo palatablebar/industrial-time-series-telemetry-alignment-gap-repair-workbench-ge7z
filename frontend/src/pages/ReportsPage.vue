@@ -1,7 +1,7 @@
 <template>
   <div class="page fade-in">
     <PageHeader
-      numeral="IV"
+      numeral="V"
       eyebrow="quality ephemeris · 质量星历"
       title="质量报告与导出"
       subtitle="按运行汇总覆盖率、漂移、异常率与质量分；口径固定、可追溯到每次 Python 引擎执行。"

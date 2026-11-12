@@ -81,6 +81,13 @@ def consume_job_quota(db, user: User) -> dict:
     return {"limit": limit, "used": user.quota_used, "remaining": max(0, limit - user.quota_used)}
 
 
+def refund_job_quota(db, user: User, quota: dict | None = None) -> None:
+    """Give back a reserved job slot when job creation is rejected downstream."""
+    user.quota_used = max(0, int(user.quota_used or 0) - 1)
+    db.commit()
+    log_event("QUOTA_REFUNDED", user_id=user.id, used=user.quota_used, reason="job rejected")
+
+
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """Redis sliding window on write requests; 429 carries retry_after."""
 

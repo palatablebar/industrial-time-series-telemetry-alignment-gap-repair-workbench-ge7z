@@ -1,7 +1,7 @@
 <template>
   <div class="page fade-in">
     <PageHeader
-      numeral="V"
+      numeral="VI"
       eyebrow="alignment run · 运行结果"
       :title="run?.job_name ?? '运行结果详情'"
       :subtitle="run ? `窗口 ${formatDateTime(run.window_start)} → ${formatDateTime(run.window_end)} · 网格 ${run.grid_s}s · ${run.agg_strategy} / ${run.fill_strategy}` : ''"
@@ -21,11 +21,13 @@
       <div v-if="run.status === 'failed'" class="failure">
         <div class="failure__tag mono">RUN FAILED</div>
         <div>
-          <h2 class="failure__title">任务失败：{{ run.failure_reason }}</h2>
+          <h2 class="failure__title">任务失败：{{ failureLabel }}</h2>
           <p class="failure__body">
-            该窗口没有足够的原始点建立对齐网格（判定条件：窗口内点数 &lt; 网格桶数 10%）或时间戳乱序率超过 30%。
-            失败原因已落库，可回到任务配置换用更大的时间窗或核查网关回传。
+            {{ failureExplanation }}
           </p>
+          <RouterLink v-if="run.failure_reason === 'batch_incomplete'" class="btn btn-quiet failure__link" to="/ingest">
+            去回传批次页查看缺段 →
+          </RouterLink>
         </div>
       </div>
 
@@ -170,6 +172,28 @@ const exportMessage = ref('')
 
 const run = computed(() => store.detail)
 
+const FAILURE_LABELS: Record<string, string> = {
+  insufficient_data: '原始点不足（窗口内点数 < 网格桶数 10%）',
+  timestamp_disorder: '时间戳乱序率超过 30%',
+  no_data: '对齐后没有任何观测值',
+  batch_incomplete: '回传批次段未到齐，拦截对齐',
+}
+
+const FAILURE_EXPLANATIONS: Record<string, string> = {
+  insufficient_data: '该窗口没有足够的原始点建立对齐网格（判定条件：窗口内点数 < 网格桶数 10%）。可换用更大的时间窗或核查网关回传。',
+  timestamp_disorder: '时间戳乱序率超过 30%，无法可靠分箱。请核查网关导出顺序后重新发起。',
+  no_data: '对齐窗口内没有任何观测值，引擎不评分。',
+  batch_incomplete:
+    '所选设备的回传批次段未到齐，已收样本只计入进度、未进入对齐输入。补齐缺段后重新发起即可，已收段无需重发。',
+}
+
+const failureLabel = computed(() =>
+  run.value ? FAILURE_LABELS[run.value.failure_reason] ?? run.value.failure_reason : '',
+)
+const failureExplanation = computed(() =>
+  run.value ? FAILURE_EXPLANATIONS[run.value.failure_reason] ?? '失败原因已落库，可回到任务配置核查。' : '',
+)
+
 async function load() {
   const runId = Number(route.params.id)
   if (!Number.isNaN(runId)) {
@@ -285,6 +309,11 @@ onMounted(load)
   font-size: 12px;
   color: var(--ink-soft);
   margin: 6px 0 0;
+}
+.failure__link {
+  margin-top: 10px;
+  padding-left: 0;
+  padding-right: 0;
 }
 .export-note {
   margin-top: 14px;

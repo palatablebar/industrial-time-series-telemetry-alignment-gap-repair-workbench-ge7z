@@ -119,3 +119,71 @@ CREATE TABLE audit_log (
     ip VARCHAR(64) DEFAULT '',
     created_at TIMESTAMP DEFAULT now()
 );
+
+-- Resumable nightly hand-over: batch -> segments -> staged samples / quarantine.
+CREATE TABLE ingest_batch (
+    id SERIAL PRIMARY KEY,
+    batch_key VARCHAR(120) UNIQUE NOT NULL,
+    source_id INTEGER NOT NULL REFERENCES data_source(id),
+    window_start TIMESTAMP NOT NULL,
+    window_end TIMESTAMP NOT NULL,
+    status VARCHAR(16) DEFAULT 'receiving',
+    expected_segments INTEGER DEFAULT 0,
+    received_segments INTEGER DEFAULT 0,
+    expected_rows INTEGER DEFAULT 0,
+    received_rows INTEGER DEFAULT 0,
+    accepted_rows INTEGER DEFAULT 0,
+    rejected_rows INTEGER DEFAULT 0,
+    promoted_rows INTEGER DEFAULT 0,
+    plan_json JSON DEFAULT '[]',
+    note TEXT DEFAULT '',
+    created_by INTEGER REFERENCES users(id),
+    created_at TIMESTAMP DEFAULT now(),
+    updated_at TIMESTAMP DEFAULT now(),
+    completed_at TIMESTAMP,
+    promoted_at TIMESTAMP
+);
+
+CREATE TABLE ingest_segment (
+    id SERIAL PRIMARY KEY,
+    batch_id INTEGER NOT NULL REFERENCES ingest_batch(id) ON DELETE CASCADE,
+    segment_key VARCHAR(80) NOT NULL,
+    ordinal INTEGER DEFAULT 0,
+    status VARCHAR(16) DEFAULT 'missing',
+    expected_rows INTEGER DEFAULT 0,
+    received_rows INTEGER DEFAULT 0,
+    accepted_rows INTEGER DEFAULT 0,
+    rejected_rows INTEGER DEFAULT 0,
+    received_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT now(),
+    UNIQUE (batch_id, segment_key)
+);
+
+CREATE TABLE ingest_sample (
+    id SERIAL PRIMARY KEY,
+    batch_id INTEGER NOT NULL REFERENCES ingest_batch(id) ON DELETE CASCADE,
+    segment_id INTEGER NOT NULL REFERENCES ingest_segment(id) ON DELETE CASCADE,
+    signal_id INTEGER NOT NULL REFERENCES signal(id),
+    ts DOUBLE PRECISION NOT NULL,
+    value DOUBLE PRECISION NOT NULL,
+    seq INTEGER DEFAULT 0
+);
+
+CREATE INDEX ix_ingest_sample_batch ON ingest_sample (batch_id);
+CREATE INDEX ix_ingest_sample_signal ON ingest_sample (signal_id);
+
+CREATE TABLE ingest_quarantine (
+    id SERIAL PRIMARY KEY,
+    batch_id INTEGER NOT NULL REFERENCES ingest_batch(id) ON DELETE CASCADE,
+    segment_id INTEGER REFERENCES ingest_segment(id) ON DELETE SET NULL,
+    segment_key VARCHAR(80) DEFAULT '',
+    line_no INTEGER DEFAULT 0,
+    reason VARCHAR(32) NOT NULL,
+    signal_code VARCHAR(60) DEFAULT '',
+    message VARCHAR(240) DEFAULT '',
+    raw_json JSON,
+    created_at TIMESTAMP DEFAULT now()
+);
+
+CREATE INDEX ix_ingest_quarantine_batch ON ingest_quarantine (batch_id);
+CREATE INDEX ix_ingest_quarantine_reason ON ingest_quarantine (reason);

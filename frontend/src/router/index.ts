@@ -7,6 +7,7 @@ const router = createRouter({
     { path: '/', redirect: '/sources' },
     { path: '/login', name: 'login', component: () => import('../pages/LoginPage.vue'), meta: { public: true } },
     { path: '/sources', name: 'sources', component: () => import('../pages/SourcesPage.vue'), meta: { title: '数据源与测点' } },
+    { path: '/ingest', name: 'ingest', component: () => import('../pages/IngestPage.vue'), meta: { title: '夜间回传批次' } },
     { path: '/jobs/new', name: 'job-new', component: () => import('../pages/JobNewPage.vue'), meta: { title: '对齐任务配置' } },
     {
       path: '/runs/:id',

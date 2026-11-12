@@ -1,7 +1,7 @@
 <template>
   <div class="page fade-in">
     <PageHeader
-      numeral="II"
+      numeral="III"
       eyebrow="grid alignment · 任务配置"
       title="对齐任务配置"
       subtitle="选择设备、时间窗与目标网格。提交后由 Celery worker 在 Python 引擎中真实重采样、估计时钟漂移并生成缺口事件。"
@@ -12,6 +12,42 @@
     </PageHeader>
 
     <PermissionNotice v-if="!auth.canWrite" text="当前角色只能查看与导出；发起对齐需要 engineer 角色（接口层同时返回 403）。" />
+
+    <div v-if="gate && !gate.can_start" class="gate-block">
+      <div class="gate-block__head">
+        <span class="gate-block__tag mono">INTAKE GATE · CLOSED</span>
+        <span class="mono gate-block__count">
+          {{ gate.blocking_batches.length }} 个未完成批次
+        </span>
+      </div>
+      <p class="gate-block__summary">{{ gate.summary }}</p>
+      <div class="gate-block__rows">
+        <div v-for="batch in gate.blocking_batches" :key="batch.id" class="gate-block__row">
+          <RouterLink :to="`/ingest?batch=${batch.id}`" class="mono gate-block__key">{{ batch.batch_key }}</RouterLink>
+          <span class="mono gate-block__progress">
+            段 {{ batch.received_segments }}/{{ batch.expected_segments }} · 已收 {{ batch.received_rows }} 行 ·
+            有效 {{ batch.accepted_rows }} · 隔离 {{ batch.rejected_rows }}
+          </span>
+          <span class="gate-block__missing">
+            缺段：
+            <span v-for="seg in batch.missing_segments" :key="seg.key" class="missing-chip mono">{{ seg.key }}</span>
+          </span>
+        </div>
+      </div>
+      <div class="gate-block__actions">
+        <RouterLink class="btn btn-quiet" :to="`/ingest?batch=${gate.blocking_batches[0].id}`">
+          去回传批次页补段 →
+        </RouterLink>
+      </div>
+      <p class="gate-block__note">
+        段未到齐时，已收样本只计入进度、不写入对齐输入，因此本次对齐不能启动；补齐后仅需投递缺段即可。
+      </p>
+    </div>
+
+    <div v-else-if="gate && gate.can_start" class="gate-open">
+      <span class="mono gate-open__tag">INTAKE GATE · OPEN</span>
+      <span class="gate-open__text">{{ gate.summary }}</span>
+    </div>
 
     <div class="split">
       <section>
@@ -94,8 +130,8 @@
         </div>
 
         <div class="submit-row">
-          <button class="btn btn-solid" :disabled="!auth.canWrite || submitting || polling.active.value" @click="submit">
-            {{ submitting || polling.active.value ? '执行中…' : '发起对齐任务' }}
+          <button class="btn btn-solid" :disabled="!auth.canWrite || submitting || polling.active.value || gate?.can_start === false" @click="submit">
+            {{ submitting || polling.active.value ? '执行中…' : gate?.can_start === false ? '回传段未到齐，暂不能启动' : '发起对齐任务' }}
           </button>
           <span class="mono submit-state">{{ statusLine }}</span>
         </div>
@@ -169,6 +205,7 @@ const polling = usePolling(1500)
 const submitting = ref(false)
 const submitError = ref<ApiError | null>(null)
 const estimate = ref<JobEstimate | null>(null)
+const gate = computed(() => estimate.value?.gate ?? null)
 const statusLine = ref('等待配置')
 
 const quota = reactive({ used: 0, limit: 40 })
@@ -284,6 +321,10 @@ async function submit() {
     submitError.value = { code: 'TSA-2002', message: '请至少选择一台设备' }
     return
   }
+  if (gate.value && !gate.value.can_start) {
+    submitError.value = { code: 'TSA-3004', message: gate.value.summary }
+    return
+  }
   submitting.value = true
   statusLine.value = '正在创建任务…'
   try {
@@ -340,6 +381,89 @@ onMounted(async () => {
 <style scoped>
 .quota {
   font-size: 10.5px;
+  color: var(--ink-soft);
+}
+.gate-block {
+  border-left: 3px solid var(--alert);
+  background: oklch(0.955 0.02 40 / 0.75);
+  padding: 12px 16px;
+  margin: 0 0 24px;
+}
+.gate-block__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.gate-block__tag {
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+  color: var(--alert);
+}
+.gate-block__count {
+  font-size: 10px;
+  color: var(--ink-soft);
+}
+.gate-block__summary {
+  margin: 8px 0 10px;
+  font-size: 12px;
+  color: var(--ink);
+}
+.gate-block__rows {
+  border-top: 1px dotted var(--rule-strong);
+}
+.gate-block__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 18px;
+  padding: 7px 0;
+  border-bottom: 1px dotted var(--rule);
+}
+.gate-block__key {
+  font-size: 11px;
+  color: var(--ochre-deep);
+}
+.gate-block__progress {
+  font-size: 10.5px;
+  color: var(--ink-soft);
+}
+.gate-block__missing {
+  font-size: 10.5px;
+  color: var(--ink-soft);
+}
+.missing-chip {
+  display: inline-block;
+  margin-left: 5px;
+  padding: 0 6px;
+  font-size: 10px;
+  border: 1px solid var(--alert);
+  color: var(--alert);
+}
+.gate-block__actions {
+  margin-top: 8px;
+}
+.gate-block__note {
+  margin: 8px 0 0;
+  font-size: 10.5px;
+  color: var(--ink-faint);
+}
+.gate-open {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-left: 3px solid var(--ok);
+  background: oklch(0.975 0.02 150 / 0.45);
+  padding: 8px 14px;
+  margin: 0 0 24px;
+}
+.gate-open__tag {
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+  color: var(--ok);
+}
+.gate-open__text {
+  font-size: 11px;
   color: var(--ink-soft);
 }
 .panel-note {

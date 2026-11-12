@@ -358,6 +358,19 @@ SEED_JOBS = [
         "note": "周度 60s 网格预演，等待车间确认后执行。",
         "engineer": "engineer@tsalign.demo",
     },
+    {
+        "key": "night_batch",
+        "name": "M-07 夜间回传补数对齐 20261110B",
+        "device_codes": ["M-07"],
+        "window_start": datetime(2026, 11, 10, 11, 0, 0),
+        "window_end": datetime(2026, 11, 10, 13, 0, 0),
+        "grid_s": 5,
+        "agg_strategy": AggStrategy.LINEAR.value,
+        "fill_strategy": FillStrategy.LINEAR.value,
+        "status": JobStatus.PENDING.value,
+        "note": "GW-CHZ-02 夜间第二批（N1–N4）补数对齐；段未到齐前不允许启动。",
+        "engineer": "engineer@tsalign.demo",
+    },
 ]
 
 
